@@ -21,11 +21,98 @@ fi
 log() { printf '\n==> %s\n' "$*"; }
 run_user() { sudo -u "$TARGET_USER" env HOME="$USER_HOME" "$@"; }
 
+get_codename() {
+  local codename=""
+  if [ -r /etc/os-release ]; then
+    codename="$(awk -F= '/^VERSION_CODENAME=/{gsub(/"/,"",$2); print $2}' /etc/os-release)"
+  fi
+  if [ -z "$codename" ] && command -v lsb_release >/dev/null 2>&1; then
+    codename="$(lsb_release -sc 2>/dev/null || true)"
+  fi
+  if [ -z "$codename" ]; then
+    echo "Could not determine release codename" >&2
+    exit 1
+  fi
+  printf '%s\n' "$codename"
+}
+
+backports_repo_present() {
+  local codename="$1"
+  grep -RhsE "^[[:space:]]*deb[[:space:]].*[[:space:]]${codename}-backports[[:space:]]" \
+    /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null \
+    | grep -q .
+}
+
+add_backports_repo() {
+  local codename="$1"
+  cat > /etc/apt/sources.list.d/devuan-backports.list <<EOF
+deb http://deb.devuan.org/merged ${codename}-backports main
+EOF
+}
+
+mesa_backports_check() {
+  local codename="$1"
+  local mesa_pkgs=(
+    libgl1-mesa-dri
+    libglx-mesa0
+    mesa-vulkan-drivers
+    mesa-va-drivers
+    mesa-vdpau-drivers
+  )
+  local need_backports=0
+  local pkg ver reply
+
+  for pkg in "${mesa_pkgs[@]}"; do
+    ver="$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)"
+    if [ -z "$ver" ] || [[ "$ver" != *~bpo* ]]; then
+      need_backports=1
+      break
+    fi
+  done
+
+  if [ "$need_backports" -eq 0 ]; then
+    log "Mesa backports already installed"
+    return 0
+  fi
+
+  log "Mesa backports not detected"
+
+  if ! backports_repo_present "$codename"; then
+    read -r -p "Devuan backports repo is not configured. Add it? [y/N] " reply
+    case "$reply" in
+      [yY]|[yY][eE][sS])
+        log "Adding Devuan backports repository"
+        add_backports_repo "$codename"
+        apt update
+        ;;
+      *)
+        echo "Skipping Mesa backports setup."
+        return 0
+        ;;
+    esac
+  fi
+
+  read -r -p "Install Mesa drivers from ${codename}-backports? [y/N] " reply
+  case "$reply" in
+    [yY]|[yY][eE][sS])
+      log "Installing Mesa backports packages"
+      apt install -y -t "${codename}-backports" "${mesa_pkgs[@]}"
+      ;;
+    *)
+      echo "Skipping Mesa backports installation."
+      ;;
+  esac
+}
+
+CODENAME="$(get_codename)"
+
 log "Installing packages"
 apt update
 apt install -y \
   flatpak pipewire wireplumber pipewire-pulse pipewire-audio \
   pulseaudio-utils alsa-utils plasma-pa dbus elogind
+
+mesa_backports_check "$CODENAME"
 
 log "Adding Flathub for user install scope"
 run_user flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -71,8 +158,9 @@ EOF2
 chown "$TARGET_USER:$TARGET_USER" "$USER_HOME/.config/autostart/pipewire-start.desktop"
 chmod 644 "$USER_HOME/.config/autostart/pipewire-start.desktop"
 
-#Esync settings for non-systemd distros (source: https://github.com/lutris/docs/blob/master/HowToEsync.md)
-echo "$TARGET_USER hard nofile 524288" >> /etc/security/limits.conf
+# Esync settings for non-systemd distros
+grep -q "^${TARGET_USER} hard nofile 524288$" /etc/security/limits.conf 2>/dev/null || \
+  echo "$TARGET_USER hard nofile 524288" >> /etc/security/limits.conf
 
 log "Done"
 echo "Now log out and back in, then test with:"
