@@ -162,6 +162,9 @@ chmod 644 "$USER_HOME/.config/autostart/pipewire-start.desktop"
 grep -q "^${TARGET_USER} hard nofile 524288$" /etc/security/limits.conf 2>/dev/null || \
   echo "$TARGET_USER hard nofile 524288" >> /etc/security/limits.conf
 
+echo "fs.inotify.max_user_instances=1024" | sudo tee /etc/sysctl.d/99-inotify.conf
+echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.d/99-inotify.conf
+
 log "Done"
 echo "Now log out and back in, then test with:"
 echo "  flatpak remotes --user"
