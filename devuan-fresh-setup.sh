@@ -92,11 +92,35 @@ mesa_backports_check() {
     esac
   fi
 
-  read -r -p "Install Mesa drivers from ${codename}-backports? [y/N] " reply
+  read -r -p "Install Mesa drivers from ${codename}-backports? (includes multiarch setup for Steam) [y/N] " reply
   case "$reply" in
     [yY]|[yY][eE][sS])
-      log "Installing Mesa backports packages"
+      log "Installing Mesa backports packages (amd64)..."
       apt install -y -t "${codename}-backports" "${mesa_pkgs[@]}"
+
+      log "Configuring Mesa multiarch pinning for ${codename}-backports..."
+      cat > /etc/apt/preferences.d/mesa-multiarch <<EOF
+Package: libgbm1 libgbm1:i386 \\
+         libgl1-mesa-dri libgl1-mesa-dri:i386 \\
+         libegl-mesa0 libegl-mesa0:i386 \\
+         libglx-mesa0 libglx-mesa0:i386
+Pin: release n=${codename}-backports
+Pin-Priority: 501
+EOF
+
+      apt update
+
+      log "Installing Mesa multiarch stack from ${codename}-backports..."
+      apt install -y \
+        libgbm1 libgbm1:i386 \
+        libgl1-mesa-dri libgl1-mesa-dri:i386 \
+        libegl-mesa0 libegl-mesa0:i386 \
+        libglx-mesa0 libglx-mesa0:i386
+
+      log "Installing GL/EGL interface libs (for native Steam)..."
+      apt install -y \
+        libegl1 libegl1:i386 \
+        libgl1 libgl1:i386
       ;;
     *)
       echo "Skipping Mesa backports installation."
@@ -106,8 +130,11 @@ mesa_backports_check() {
 
 CODENAME="$(get_codename)"
 
-log "Installing packages"
+log "Enabling i386 multiarch (needed for native Steam & 32-bit games)..."
+dpkg --add-architecture i386 || true
 apt update
+
+log "Installing packages"
 apt install -y \
   flatpak pipewire wireplumber pipewire-pulse pipewire-audio \
   pulseaudio-utils alsa-utils plasma-pa dbus elogind
