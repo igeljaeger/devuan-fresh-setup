@@ -18,6 +18,10 @@ if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
   exit 1
 fi
 
+log "Enabling i386 multiarch (needed for native Steam & 32-bit games)..."
+dpkg --add-architecture i386 || true
+apt update
+
 log() { printf '\n==> %s\n' "$*"; }
 run_user() { sudo -u "$TARGET_USER" env HOME="$USER_HOME" "$@"; }
 
@@ -129,10 +133,6 @@ EOF
 }
 
 CODENAME="$(get_codename)"
-
-log "Enabling i386 multiarch (needed for native Steam & 32-bit games)..."
-dpkg --add-architecture i386 || true
-apt update
 
 log "Installing packages"
 apt install -y \
